@@ -1,10 +1,11 @@
 import express from 'express';
 import {User} from "../models/user.model.js";
 import jwt from "jsonwebtoken";
+import auth from '../middlewares/auth.js';
 
 const router = express.Router();
 
-router.post('/signup' , async (req,res) => {
+router.post('/signup', async (req,res) => {
     console.log(req.body);
     const { name, email, password } = req.body;
 
@@ -20,7 +21,8 @@ router.post('/signup' , async (req,res) => {
         const token = jwt.sign({userId : user._id} , process.env.JWT_SECRET , {expiresIn : '5m'});
         user.password = undefined;
         console.log("User created successfully");
-        res.status(201).json({user, token});
+        res.cookie("token" , token);
+        res.status(201).json({message : "User Created Successfully"});
     } catch (error) {
         console.log(error);
         res.status(500).json({message: "Error creating user"});
@@ -45,33 +47,76 @@ router.post("/login" , async (req,res) => {
     
     const token = jwt.sign({userId : user._id} , process.env.JWT_SECRET , {expiresIn : '5m'});
     user.password = undefined;
-    res.status(200).json({user , token});
+    res.cookie("token" , token)
+    res.status(200).json({message : "User Logged in Successfully"});
 }) 
 
 
 
-router.get('/profile' , async (req,res) => {
-    const token = req.headers.authorization?.split(" ")[1];
-    console.log("Token: ", token);
-    if(!token){
-        res.status(401).json({message : "Unauthorized"});
-        return;
-    }
+router.get('/profile', auth,  async (req,res) => {
+    const id = req.userId;
     try {
-        const decoded = jwt.verify(token , process.env.JWT_SECRET);
-        const user = await User.findById(decoded.userId);
-        if(!user){
-            res.status(404).json({message : "User not found"});
-            return;
-        }
-        user.password = undefined;
-        res.status(200).json({user});
+        const user = await User.findById(id);
+        if(!user) return res.json({message : "User Not Found"});
+        user.password = undefined
+        return res.json({"user" : user})
     } catch (error) {
-        res.status(401).json({message : "Invalid token"});
+        return res.json({message : "Internal Server Error"});
+        console.log(error)
     }
 })
 
 
+router.put('/profile', auth, async (req, res) => {
+    try {
+        const user = await User.findById(req.userId);
+
+        if (!user) {
+            return res.status(404).json({ message: "User Not Found" });
+        }
+
+        if (req.body.name) user.name = req.body.name;
+        if (req.body.email) user.email = req.body.email;
+        if (req.body.password) user.password = req.body.password;
+
+        await user.save();
+
+        return res.status(200).json({ message: "User Profile Updated" });
+
+    } catch (error) {
+        console.log("Error in Profile Update:", error);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+});
+
+
+
+router.patch('/profile' , auth , async (req,res) => {
+    const id = req.userId;
+    try {
+        const user = await User.findById(id);
+        if(!user) return res.json({message : "User not found"});
+
+        const allowedUpdates = ["email" , "password" , "name"];
+        const updates = Object.keys(req.body);
+
+        const isValidOperation = updates.every((field) => allowedUpdates.includes(field));
+        if(!isValidOperation) return res.status(400).json({message : "Invalid update fields"});
+
+
+        updates.forEach((key) => {
+            user[key] = req.body[key];
+        });
+
+        await user.save();
+
+        return res.status(200).json({message : "User Profile Updated"});
+
+    } catch (error) {
+        console.log(error);
+        return res.status(500).json({message : "Internal Server Error"});
+    }
+})
 
 
 
